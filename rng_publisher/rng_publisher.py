@@ -1,6 +1,8 @@
 import os
 import random
 import time
+import datetime
+import json
 import paho.mqtt.client as mqtt
 
 
@@ -34,11 +36,14 @@ while True:
         print("Starting publish stream of RNG values...")
         while True:
             try:
+                curr_date = datetime.datetime.now()
+                curr_tstamp = datetime.datetime.timestamp(curr_date)
                 rng_value = str(random.choice(range(1, 100)))
                 print("RNG value to publish to broker is {0}.".format(rng_value))
+                payload = {'timestamp': curr_tstamp, 'rng_value': rng_value}
                 c.publish(
                     topic=topic,
-                    payload=rng_value)
+                    payload=json.dumps(payload))
                 print("Successfully published RNG value {0} to MQTT broker '{1}', topic '{2}'.".format(rng_value, host, topic))
                 interval = random.choice(range(1, 30))
                 print("Sleeping for {0} seconds before publishing again...".format(str(interval)))
