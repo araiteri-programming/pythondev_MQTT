@@ -1,4 +1,6 @@
 import os
+import sys
+import logging
 import json
 import time
 import traceback
@@ -35,6 +37,7 @@ def calculate_time_period_average(data, start_timestamp, end_timestamp):
 
 
 # Get script vars from env
+logging_level = str(os.getenv('LOGGING_LEVEL'))
 host = str(os.getenv('BROKER_HOST'))
 port = int(os.getenv('BROKER_PORT'))
 client_id = str(os.getenv('CLIENT_ID'))
@@ -45,6 +48,20 @@ rng_topic = str(os.getenv('RNG_TOPIC'))  # Topic on which RNG values will be rec
 avgs_topic = str(os.getenv('AVG_TOPIC'))  # Topic to publish calculated averages on.
 msg_interval = int(os.getenv('MSG_INTERVAL'))  # How often calculated averages should be published.
 max_datapoint_age = int(os.getenv('MAX_DATAPOINT_AGE'))  # Maximum age of received datapoints before they are purged.
+log_format = "%(levelname)s %(asctime)s - %(message)s"
+logging_levels = {
+    'debug': logging.DEBUG,
+    'info': logging.INFO,
+    'warning': logging.WARNING,
+    'error': logging.ERROR,
+    'critical': logging.CRITICAL,
+}
+if logging_level not in logging_levels.keys():
+    raise Exception("Invalid logging level received: '{0}'. Please provide one of the following as logging level: "
+                    "debug, info, warning, error, critical.".format(str(logging_level)))
+logging.basicConfig(stream=sys.stdout,
+                    format=log_format,
+                    level=logging_levels[logging_level])
 data = []  # Initialise RNG value dataset
 # Each key-value pair defined here is an average value that will be calculated and published to the MQTT broker.
 averages_to_calc = {
@@ -61,21 +78,23 @@ c.username_pw_set(
     username=username,
     password=password)
 try:
-    print("Attempting connection to MQTT broker '{0}'...".format(host))
+    logging.info("Attempting connection to MQTT broker '{0}'...".format(host))
     c.connect(
         host=host,
         port=port)
+    logging.info("Successfully connected to MQTT broker '{0}'.".format(host))
     c.subscribe(rng_topic)  # Subscribe to RNG value MQTT stream from broker.
+    logging.info("Starting MQTT client network loop...")
     c.loop_start()  # Start the client network loop to receive RNG values in the background.
-    print("Successfully connected to MQTT broker '{0}'. Starting publish...".format(host))
-    print("Starting loop...")
+    logging.info("Successfully started MQTT client network loop.")
+    print("Starting publish stream of RNG average values...")
     while True:
-        print("Pre-trim datapoint contents: {0}".format(str(data)))
+        logging.debug("Pre-purge dataset contents: {0}".format(str(data)))
         # Calculate timestamp used to purge old data and calculate 1, 5 and 30 minute RNG value averages from
         # datapoints.
         curr_tstamp = datetime.timestamp(datetime.now())
         data = purge_old_data(data, (curr_tstamp - max_datapoint_age))  # Remove datapoints older than maximum age.
-        print("Post-trim datapoint contents: {0}".format(str(data)))
+        logging.debug("Post-purge dataset contents: {0}".format(str(data)))
         calc_avgs = {}  # Initialise payload to be published to MQTT broker
         for k in averages_to_calc.keys():
             end_timestamp = curr_tstamp  # Average values are calculated from current time, looking backwards over
@@ -83,21 +102,24 @@ try:
             start_timestamp = curr_tstamp - averages_to_calc[k]  # Key value specifies max age (in seconds) of
             # datapoints for this average value. E.g. max age of one minute average is 60 seconds.
             calc_avgs[k] = calculate_time_period_average(data, start_timestamp, end_timestamp)
-        print('Average values calculated: 1min=={0}, 5min=={1}, 30min=={2}'.format(calc_avgs['one_min_avg'],
-                                                                                   calc_avgs['five_min_avg'],
-                                                                                   calc_avgs['thirty_min_avg']))
         c.publish(
             topic=avgs_topic,
             payload=json.dumps(calc_avgs)
         )
-        print("Successfully published average values to MQTT broker '{0}', topic '{1}'.".format(host, avgs_topic))
-        print("Waiting {0} seconds before sending updated MQTT...".format(str(msg_interval)))
+        log_str = "Successfully published RNG average values to MQTT broker '{0}', topic '{0}'. " \
+                  "Average values:\n".format(host, rng_topic)
+        for k in calc_avgs.keys():
+            log_str = log_str + "{0}: {1}\n".format(k, str(calc_avgs[k]))
+        logging.info(log_str)
+        logging.info("Waiting {0} seconds before sending updated MQTT...".format(str(msg_interval)))
         time.sleep(msg_interval)  # Wait the configured wait time before sending another MQTT message.
 except Exception as e:
-    traceback.print_exc()
+    logging.error(traceback.format_exc())
 finally:
-    print("Stopping loop...")
-    c.loop_stop()
-    print("Disconnecting from MQTT broker '{0}'...".format(host))
-    c.disconnect()
-    print("Successfully disconnected.")
+    print("RNG average value publishing stopped.")
+    logging.info("Stopping MQTT client network loop...")
+    c.loop_stop()  # Stop the Client network loop.
+    logging.info("Successfully stopped MQTT client network loop.")
+    logging.info("Disconnecting from MQTT broker '{0}'...".format(host))
+    c.disconnect()  # Disconnect from the MQTT broker.
+    logging.info("Successfully disconnected from MQTT broker '{0}'.".format(host))
