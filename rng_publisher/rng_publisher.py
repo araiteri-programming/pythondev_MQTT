@@ -11,10 +11,10 @@ import paho.mqtt.client as mqtt
 host = str(os.getenv('BROKER_HOST'))
 port = int(os.getenv('BROKER_PORT'))
 client_id = str(os.getenv('CLIENT_ID'))
-clean_session = bool(os.getenv('CLEAN_SESSION'))
-username = str(os.getenv('USERNAME'))
-password = str(os.getenv('PASSWORD'))
-rng_topic = str(os.getenv('RNG_TOPIC'))
+clean_session = bool(os.getenv('CLEAN_SESSION'))  # True/false (control whether MQTT broker queues messages)
+username = str(os.getenv('USERNAME'))  # MQTT username/password authentication
+password = str(os.getenv('PASSWORD'))  # MQTT username/password authentication
+rng_topic = str(os.getenv('RNG_TOPIC'))  # Topic to publish RNG values on.
 while True:
     c = mqtt.Client(
         client_id=client_id,
