@@ -1,7 +1,8 @@
 import os
 import json
 import time
-import datetime
+import traceback
+from datetime import datetime
 import paho.mqtt.client as mqtt
 
 
@@ -12,59 +13,25 @@ def add_rng_datapoint(client, userdata, message):
     data.append(datapoint)
 
 
-# Function purges all datapoints that are 30+ minutes older than the timestamp passed to the function.
-def purge_old_data(timestamp):
-    global data
-    new_data = []
-    # Populate a working list of all data that isn't older than 30 minutes.
+# Function purges all datapoints that are older than the minimum timestamp.
+def purge_old_data(data, minimum_timestamp):
+    working_list = []
     for d in data:
-        if d["timestamp"] + 1800 >= timestamp:
-            new_data.append(d)
-    data = new_data  # Overwrite existing data set with new data set with expired datapoints omitted.
+        if d["timestamp"] >= minimum_timestamp:
+            working_list.append(d)
+    return working_list
 
 
-# Function iterates through all stored data, calculating 1+5+30 minute averages over all the data and returns those
-# values.
-def calculate_avgs(timestamp):
-    global data
-    avgs = {}
-    datapoints = 0
-    total = 0
-    # Find all entries <= 1 minute old and add to working sum.
+# Function calculates the average RNG value over datapoints that fall within the start and end timestamps.
+def calculate_time_period_average(data, start_timestamp, end_timestamp):
+    working_list = []
     for d in data:
-        if d["timestamp"] + 60 >= timestamp:
-            datapoints += 1
-            total = total + int(d["rng_value"])
-    # Calculate 1 minute average, or return 0 to indicate no datapoints in 1 minute period.
-    if total != 0:
-        avgs["one_min_avg"] = total / datapoints
+        if start_timestamp <= d['timestamp'] <= end_timestamp:
+            working_list.append(int(d['rng_value']))
+    if len(working_list) > 0:
+        return sum(working_list) / len(working_list)
     else:
-        avgs["one_min_avg"] = 0
-    datapoints = 0
-    total = 0
-    # Find all entries <= 5 minutes old and add to working sum.
-    for d in data:
-        if d["timestamp"] + 300 >= timestamp:
-            datapoints += 1
-            total = total + int(d["rng_value"])
-    # Calculate 5 minute average, or return 0 to indicate no datapoints in 5 minute period.
-    if total != 0:
-        avgs["five_min_avg"] = total / datapoints
-    else:
-        avgs["five_min_avg"] = 0
-    datapoints = 0
-    total = 0
-    # Find all entries <= 30 minutes old and add to working sum.
-    for d in data:
-        if d["timestamp"] + 1800 >= timestamp:
-            datapoints += 1
-            total = total + int(d["rng_value"])
-    # Calculate 30 minute average, or return 0 to indicate no datapoints in 30 minute period.
-    if total != 0:
-        avgs["thirty_min_avg"] = total / datapoints
-    else:
-        avgs["thirty_min_avg"] = 0
-    return avgs
+        return 0
 
 
 # Get script vars from env
@@ -77,7 +44,14 @@ password = str(os.getenv('PASSWORD'))  # MQTT username/password authentication
 rng_topic = str(os.getenv('RNG_TOPIC'))  # Topic on which RNG values will be received.
 avgs_topic = str(os.getenv('AVG_TOPIC'))  # Topic to publish calculated averages on.
 msg_interval = int(os.getenv('MSG_INTERVAL'))  # How often calculated averages should be published.
-data = []
+max_datapoint_age = int(os.getenv('MAX_DATAPOINT_AGE'))  # Maximum age of received datapoints before they are purged.
+data = []  # Initialise RNG value dataset
+# Each key-value pair defined here is an average value that will be calculated and published to the MQTT broker.
+averages_to_calc = {
+    'one_min_avg': 60,
+    'five_min_avg': 300,
+    'thirty_min_avg': 1800
+}
 c = mqtt.Client(
     client_id=client_id,
     clean_session=clean_session)
@@ -99,11 +73,16 @@ try:
         print("Pre-trim datapoint contents: {0}".format(str(data)))
         # Calculate timestamp used to purge old data and calculate 1, 5 and 30 minute RNG value averages from
         # datapoints.
-        curr_date = datetime.datetime.now()
-        curr_tstamp = datetime.datetime.timestamp(curr_date)
-        purge_old_data(curr_tstamp)  # Remove datapoints too old for 1, 5 and 30 minute averages.
+        curr_tstamp = datetime.timestamp(datetime.now())
+        data = purge_old_data(data, (curr_tstamp - max_datapoint_age))  # Remove datapoints older than maximum age.
         print("Post-trim datapoint contents: {0}".format(str(data)))
-        calc_avgs = calculate_avgs(curr_tstamp)
+        calc_avgs = {}  # Initialise payload to be published to MQTT broker
+        for k in averages_to_calc.keys():
+            end_timestamp = curr_tstamp  # Average values are calculated from current time, looking backwards over
+            # the dataset.
+            start_timestamp = curr_tstamp - averages_to_calc[k]  # Key value specifies max age (in seconds) of
+            # datapoints for this average value. E.g. max age of one minute average is 60 seconds.
+            calc_avgs[k] = calculate_time_period_average(data, start_timestamp, end_timestamp)
         print('Average values calculated: 1min=={0}, 5min=={1}, 30min=={2}'.format(calc_avgs['one_min_avg'],
                                                                                    calc_avgs['five_min_avg'],
                                                                                    calc_avgs['thirty_min_avg']))
@@ -115,7 +94,7 @@ try:
         print("Waiting {0} seconds before sending updated MQTT...".format(str(msg_interval)))
         time.sleep(msg_interval)  # Wait the configured wait time before sending another MQTT message.
 except Exception as e:
-    print(str(e))
+    traceback.print_exc()
 finally:
     print("Stopping loop...")
     c.loop_stop()
