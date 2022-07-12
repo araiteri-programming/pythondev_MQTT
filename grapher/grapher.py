@@ -106,7 +106,7 @@ try:
             topic=avgs_topic,
             payload=json.dumps(calc_avgs)
         )
-        log_str = "Successfully published RNG average values to MQTT broker '{0}', topic '{0}'. " \
+        log_str = "Successfully published RNG average values to MQTT broker '{0}', topic '{1}'. " \
                   "Average values:\n".format(host, rng_topic)
         for k in calc_avgs.keys():
             log_str = log_str + "{0}: {1}\n".format(k, str(calc_avgs[k]))
