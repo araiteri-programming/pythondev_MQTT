@@ -20,6 +20,7 @@ Command to build images:
 For container name + hostname, I've been appending <name>1, <name>2 to number the containers.
 
 To run the containers, you can use the following commands:
+
 "rng_publisher"
 `docker run -d --hostname rng_publisher1 --name rng_publisher1 -e LOGGING_LEVEL='error' -e CLIENT_ID='rng_publisher1' --env-file '/home/ubuntu/vars.txt' rng_publisher`
 
