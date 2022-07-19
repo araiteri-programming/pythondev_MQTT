@@ -1,0 +1,74 @@
+---
+- hosts: all
+  tasks:
+
+    - name: Remove old Docker containers
+      community.docker.docker_container:
+        state: absent
+        forcekill: yes
+        name: '{{item}}'
+      loop:
+        - rabbitmq1
+        - rng_publisher1
+        - grapher1
+        - console1
+
+    - name: Remove old Docker images
+      community.docker.docker_image:
+        state: absent
+        name: '{{item}}'
+      loop:
+        - rabbitmq
+        - rng_publisher
+        - grapher
+        - console
+
+    - name: Copy project files over
+      ansible.builtin.copy:
+        src: '/home/ubuntu/switchdin_MQTT'
+        dest: '/home/ubuntu/'
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Build new Docker images
+      community.docker.docker_image:
+        name: '{{item}}'
+        state: present
+        build:
+          path: '/home/ubuntu/switchdin_MQTT/{{item}}'
+        source: build
+      loop:
+        - rng_publisher
+        - grapher
+        - console
+
+    - name: Deploy RabbitMQ container
+      community.docker.docker_container:
+        name: rabbitmq1
+        hostname: rabbitmq1
+        image: rabbitmq
+        detach: yes
+        env: {RABBITMQ_DEFAULT_USER: ayootuser, RABBITMQ_DEFAULT_PASS: ayootpassword}
+        restart_policy: always
+
+    - name: Enable MQTT on RabbitMQ container
+      community.docker.docker_container_exec:
+        container: rabbitmq1
+        detach: yes
+        command: rabbitmq-plugins enable rabbitmq_mqtt
+
+    - name: Deploy containers
+      community.docker.docker_container:
+        name: '{{item}}1'
+        hostname: '{{item}}1'
+        image: '{{item}}'
+        detach: yes
+        env: {CLIENT_ID: '{{item}}1', LOGGING_LEVEL: 'info'}
+        env_file: '/home/ubuntu/switchdin_MQTT/vars.txt'
+        restart_policy: always
+        command: tail -f /dev/null
+      loop:
+        - rng_publisher
+        - grapher
+        - console
