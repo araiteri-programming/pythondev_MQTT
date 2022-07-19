@@ -42,3 +42,5 @@ Recommended order to start each container's script:
 2. "rng_publisher"
 3. "grapher"
 4. "console"
+
+The Ansible playbook 'install_mqtt_containers_remote.yaml' can be run from the Ansible server to automate cleaning up the old/not working solution setup on the Ansible client and build the solution from scratch (automated application deployment).
